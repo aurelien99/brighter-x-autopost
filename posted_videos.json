@@ -1,0 +1,17 @@
+{
+  "_description": "Base de données des vidéos déjà traitées et publiées",
+  "_schema": {
+    "video_id": "string - YouTube video ID",
+    "title": "string - Titre de la vidéo",
+    "url": "string - URL de la vidéo",
+    "published_at": "string - Date de publication YouTube (ISO 8601)",
+    "detected_at": "string - Date de détection par le système (ISO 8601)",
+    "transcript_status": "string - 'success' | 'failed' | 'missing'",
+    "thread_generated": "boolean",
+    "review_status": "string - 'pending' | 'approved' | 'rejected'",
+    "posted_at": "string - Date de publication sur X (ISO 8601) ou null",
+    "thread_id": "string - ID du thread X ou null",
+    "error": "string - Message d'erreur éventuel"
+  },
+  "videos": []
+}
