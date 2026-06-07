@@ -1,0 +1,16 @@
+{
+  "_description": "File d'attente des threads a generer et publier (planning)",
+  "_schema": {
+    "plan_id": "string - Identifiant unique du plan",
+    "video_id": "string - YouTube video ID source",
+    "video_title": "string - Titre de la video YouTube",
+    "video_url": "string - URL de la video YouTube",
+    "detected_at": "string - Date de detection (ISO 8601)",
+    "thread_content": "array - Liste des tweets a publier",
+    "status": "string - 'pending' | 'generating' | 'ready_for_review' | 'approved' | 'rejected' | 'published'",
+    "reviewed_at": "string - Date de revision humaine (ISO 8601) ou null",
+    "published_at": "string - Date de publication sur X (ISO 8601) ou null",
+    "error": "string - Message d'erreur eventuel"
+  },
+  "planned_threads": []
+}
