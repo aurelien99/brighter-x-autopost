@@ -1,6 +1,5 @@
 feedparser
 youtube-transcript-api
-tweepy
-python-dotenv
-requests
 google-generativeai
+python-dotenv
+tweepy
