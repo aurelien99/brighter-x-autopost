@@ -39,24 +39,28 @@ def get_latest_video():
     }
 
 def get_transcript(video_id):
-    """Version ultra-robuste pour YouTube Transcript"""
+    """Essai avec différentes méthodes d'import"""
     try:
+        # Import local pour éviter les conflits
+        import youtube_transcript_api
+        print(f"Version youtube-transcript-api : {youtube_transcript_api.__version__}")
+        
         from youtube_transcript_api import YouTubeTranscriptApi
-        # Appel correct (YouTubeTranscriptApi est la classe, get_transcript est une méthode statique)
-        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'fr', 'en-US'])
+        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'fr'])
         text = " ".join([item['text'] for item in transcript])
-        print(f"✅ Transcript récupéré avec succès ({len(text)} caractères)")
+        print(f"✅ Transcript récupéré ({len(text)} caractères)")
         return text
     except Exception as e:
         print(f"⚠️ Transcript non disponible : {e}")
         return None
 
 def create_thread(title, url):
+    """Thread de bonne qualité même sans transcript"""
     return [
         f"1/5 🔥 Nouvelle vidéo @BrighterwithHerbert : {title[:110]}...",
-        f"2/5 Regardez l'analyse complète ici → {url}",
+        f"2/5 Regardez l'analyse complète → {url}",
         "3/5 SpaceX continue-t-il de surprendre les investisseurs ?",
-        "4/5 Quel est votre avis sur Starship et Optimus ?",
+        "4/5 Quel est votre avis sur le futur de Starship et Optimus ?",
         f"5/5 #Tesla #SpaceX #Optimus #FSD @aurel99"
     ]
 
