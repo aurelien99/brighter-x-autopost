@@ -1,0 +1,29 @@
+# Environment variables (SENSITIVE)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+autopost.log
+
+# Data
+posted_videos.json
+planned_threads.json
+
+# Artifacts
+artifacts/
