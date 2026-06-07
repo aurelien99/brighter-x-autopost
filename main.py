@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# ===================== CONFIG =====================
 RSS_URL = "https://www.youtube.com/feeds/videos.xml?channel_id=UC4DBLlq1x0AKmip1QJUcbXg"
 DB_FILE = "posted_videos.json"
 ARTIFACTS_DIR = "artifacts"
@@ -38,25 +39,24 @@ def get_latest_video():
     }
 
 def get_transcript(video_id):
-    """Version finale et très robuste"""
+    """Version ultra-robuste pour YouTube Transcript"""
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
-        # Méthode correcte et la plus fiable
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        text = " ".join(item['text'] for item in transcript)
-        print(f"✅ Transcript OK ({len(text)} caractères)")
+        # Appel correct (YouTubeTranscriptApi est la classe, get_transcript est une méthode statique)
+        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'fr', 'en-US'])
+        text = " ".join([item['text'] for item in transcript])
+        print(f"✅ Transcript récupéré avec succès ({len(text)} caractères)")
         return text
     except Exception as e:
-        print(f"⚠️ Transcript non disponible : {type(e).__name__} - {e}")
+        print(f"⚠️ Transcript non disponible : {e}")
         return None
 
 def create_thread(title, url):
-    """Thread de qualité même sans transcript"""
     return [
-        f"1/5 🔥 Nouvelle vidéo @BrighterwithHerbert : {title[:100]}...",
-        f"2/5 Regardez l'analyse complète → {url}",
-        "3/5 SpaceX continue de surprendre les investisseurs ?",
-        "4/5 Quel est votre avis sur le futur de Starship et Optimus ?",
+        f"1/5 🔥 Nouvelle vidéo @BrighterwithHerbert : {title[:110]}...",
+        f"2/5 Regardez l'analyse complète ici → {url}",
+        "3/5 SpaceX continue-t-il de surprendre les investisseurs ?",
+        "4/5 Quel est votre avis sur Starship et Optimus ?",
         f"5/5 #Tesla #SpaceX #Optimus #FSD @aurel99"
     ]
 
@@ -84,9 +84,9 @@ def main():
 
     save_artifact(video["id"], video["title"], tweets)
 
-    print("\n" + "="*85)
+    print("\n" + "="*90)
     print("🧐 THREAD PRÊT POUR REVIEW")
-    print("="*85)
+    print("="*90)
     for i, t in enumerate(tweets, 1):
         print(f"\nTweet {i} ({len(t)} chars):\n{t}\n")
 
