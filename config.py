@@ -2,7 +2,9 @@
 """
 config.py - Configuration globale du projet Brighter X Autopost.
 Centralise toutes les constantes, chemins et le PROMPT MASTER.
+新一代版本：使用 Google Gemini（免费）代替 Anthropic Claude。
 """
+
 import os
 from pathlib import Path
 import logging
@@ -28,12 +30,16 @@ X_TWEET_DELAY_SECONDS = int(os.getenv("TWEET_SLEEP_SECONDS", "3"))
 X_MAX_RETRIES = int(os.getenv("X_MAX_RETRIES", "3"))
 
 # ============================================================================
-# AI (Anthropic Claude)
+# AI (Google Gemini - gratuit)
 # ============================================================================
-AI_MODEL = os.getenv("AI_MODEL", "claude-3-5-haiku-latest")
-AI_MAX_TOKENS = int(os.getenv("AI_MAX_TOKENS", "1000"))
+# Modeles disponibles :
+#   gemini-2.5-flash          : rapide, gratuit, bon rapport qualite/prix
+#   gemini-2.5-flash-lite     : plus rapide, moins de contexte
+#   gemini-2.5-pro            : qualite max (payant)
+AI_MODEL = os.getenv("AI_MODEL", "gemini-2.5-flash")
+AI_MAX_TOKENS = int(os.getenv("AI_MAX_TOKENS", "1500"))
 AI_TEMPERATURE = float(os.getenv("AI_TEMPERATURE", "0.7"))
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 # ============================================================================
 # PUBLICATION & REVIEW
@@ -45,18 +51,14 @@ TWEET_SLEEP_SECONDS = int(os.getenv("TWEET_SLEEP_SECONDS", "3"))
 # DATABASE & FILES
 # ============================================================================
 PROJECT_ROOT = Path(__file__).parent.resolve()
-
-# Nom alias pour compatibilite avec main.py
 ARTIFACT_DIR = str(PROJECT_ROOT / "artifacts")
 PLANNING_DB_PATH = str(PROJECT_ROOT / "artifacts" / "planned_threads.json")
 POSTED_DB_PATH = str(PROJECT_ROOT / "artifacts" / "posted_videos.json")
 LOG_FILE = str(PROJECT_ROOT / "artifacts" / "logs" / "autopost.log")
 
-# Valeurs par defaut pour les fichiers JSON
 PLANNING_DB_DEFAULT = []
 POSTED_DB_DEFAULT = {"videos": []}
 
-# Pattern et tokens pour les fichiers artifact
 ARTIFACT_FILE_PATTERN = "thread_{video_id}.txt"
 ARTIFACT_APPROVED_TOKEN = "APPROVED"
 ARTIFACT_REJECTED_TOKEN = "REJECTED"
@@ -77,20 +79,16 @@ def ensure_artifacts_dirs():
     Path(ARTIFACT_DIR).mkdir(parents=True, exist_ok=True)
     (Path(ARTIFACT_DIR) / "logs").mkdir(parents=True, exist_ok=True)
 
-
 # ============================================================================
-# PROMPT MASTER - Generation de threads X optimises
+# PROMPT MASTER - Generation de threads X optimises (pour Gemini)
 # ============================================================================
 PROMPT_MASTER = """
-ROLE: Tu es un expert en social media et en creation de threads X (Twitter)
-viraux dans le domaine de la tech automobile (Tesla, EV, energie, IA).
-TACHE: A partir du transcript d'une video YouTube ci-dessous, genere un thread
-X de 3 a 8 tweets qui resume les points cles de maniere engageante, claire et
-optimisee pour les interactions (likes, retweets, reponses).
+ROLE: Tu es un expert en social media et en creation de threads X (Twitter) viraux dans le domaine de la tech automobile (Tesla, EV, energie, IA).
+TACHE: A partir du transcript d'une video YouTube ci-dessous, genere un thread X de 3 a 8 tweets qui resume les points cles de maniere engageante, claire et optimisee pour les interactions (likes, retweets, reponses).
+
 === REGLES STRICTES A RESPECTER ===
 [1] FORMAT NUMEROTATION
-- Chaque tweet DOIT commencer par "N/N" ou N est le numero du tweet et N le
-total (ex: 1/5, 2/5, 3/5, 4/5, 5/5).
+- Chaque tweet DOIT commencer par "N/N" ou N est le numero du tweet et N le total (ex: 1/5, 2/5, 3/5, 4/5, 5/5).
 - Le SEUL caractere autorise APRES le numero est un espace ou un saut de ligne.
 [2] LIMITE DE CARACTERES
 - Chaque tweet doit faire MAXIMUM 260 caracteres (espaces inclus).
@@ -106,13 +104,14 @@ total (ex: 1/5, 2/5, 3/5, 4/5, 5/5).
 - Le DERNIER tweet DOIT inclure le lien YouTube de la video.
 [6] HASHTAGS
 - Maximum 2 a 3 hashtags par tweet.
-- Hashtags recommandes: #Tesla #EV #EI #Tech (adapter au contenu).
+- Hashtags recommandes: #Tesla #EV #AI #Tech (adapter au contenu).
 [7] LANGUE & TON
 - Francais MAIN. Termes techniques en anglais (AI, LLM, OTA, FSD, BMS, BEV...).
 - Ton: dynamique, direct, un peu provocateur mais factuel.
 - Utilise des emojis avec parcimonie (1-2 par tweet max).
 [8] VERIFICATION FINALE (obligatoire)
 - Compte les caracteres de CHAQUE tweet avant d'afficher.
+
 === FORMAT DE SORTIE ATTENDU ===
 Reponds UNIQUEMENT avec les tweets au format suivant, rien d'autre:
 1/N [Accroche]
@@ -125,11 +124,14 @@ Reponds UNIQUEMENT avec les tweets au format suivant, rien d'autre:
 ---
 N/N [CTA + Lien YouTube + Hashtags]
 Le separateur "---" permet de delimiter les tweets.
+
 === TRANSCRIPT DE LA VIDEO ===
 {transcript}
+
 === METADONNEES VIDEO ===
 Titre: {title}
 URL: {url}
 Duree: {duration}
+
 Genere maintenant le thread en respectant TOUTES les regles strictes ci-dessus.
 """
