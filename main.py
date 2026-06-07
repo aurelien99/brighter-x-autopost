@@ -18,14 +18,27 @@ os.makedirs(ARTIFACTS_DIR, exist_ok=True)
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 def load_db():
+    """Charge la DB avec gestion robuste des erreurs."""
     if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r") as f:
-            return json.load(f)
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                db = json.load(f)
+            
+            if not isinstance(db, dict):
+                db = {}
+            if "posted" not in db or not isinstance(db.get("posted"), list):
+                db["posted"] = []
+            
+            return db
+        except Exception as e:
+            print(f"⚠️ Fichier {DB_FILE} corrompu ({e}). Réinitialisation.")
+            return {"posted": []}
+    
     return {"posted": []}
 
 def save_db(db):
-    with open(DB_FILE, "w") as f:
-        json.dump(db, f, indent=2)
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(db, f, indent=2, ensure_ascii=False)
 
 def get_latest_video():
     feed = feedparser.parse(RSS_URL)
@@ -63,16 +76,16 @@ Crée un thread X complet et prêt à publier.
 
 Titre : {title}
 Lien : {video_url}
-Transcript : {transcript[:15000]}
+Transcript : {transcript[:18000]}
 
 Réponds UNIQUEMENT avec le thread, séparé par ---"""
 
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
-        raw_thread = response.text.strip()
+        raw = response.text.strip()
         
-        tweets = [t.strip() for t in raw_thread.split('---') if t.strip()]
+        tweets = [t.strip() for t in raw.split('---') if t.strip() and len(t.strip()) > 5]
         return tweets
     except Exception as e:
         print(f"❌ Erreur Gemini: {e}")
@@ -82,58 +95,51 @@ def save_artifact(video_id, title, tweets):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{ARTIFACTS_DIR}/{timestamp}_{video_id[:8]}.txt"
     with open(filename, "w", encoding="utf-8") as f:
-        f.write(f"Titre: {title}\n\n")
+        f.write(f"Titre: {title}\nVideo ID: {video_id}\n\n")
         for i, tweet in enumerate(tweets, 1):
-            char_count = len(tweet)
-            f.write(f"Tweet {i}/{len(tweets)} ({char_count} chars):\n{tweet}\n\n")
+            f.write(f"Tweet {i}/{len(tweets)} ({len(tweet)} chars):\n{tweet}\n\n")
     print(f"✅ Artifact sauvegardé : {filename}")
     return filename
-
-def post_thread(tweets):
-    # TODO: Implémentation Tweepy complète
-    print("🔄 Simulation de publication...")
-    for tweet in tweets:
-        print(f"→ {tweet[:120]}...")
-    return True
 
 def main():
     db = load_db()
     video = get_latest_video()
     
-    if not video or video["id"] in db["posted"]:
-        print("✅ Aucune nouvelle vidéo.")
+    if not video or video["id"] in db.get("posted", []):
+        print("✅ Aucune nouvelle vidéo à traiter.")
         return
+
+    print(f"🎥 Nouvelle vidéo détectée : {video['title']}")
 
     transcript = get_transcript(video["id"])
     if not transcript:
-        print("❌ Pas de transcript disponible.")
+        print("❌ Impossible d'obtenir le transcript.")
         return
 
-    print(f"🎥 Nouvelle vidéo : {video['title']}")
     tweets = generate_thread_with_gemini(video["title"], transcript, video["url"])
-    
     if not tweets:
-        print("❌ Échec génération.")
+        print("❌ Échec de la génération du thread.")
         return
 
     artifact_file = save_artifact(video["id"], video["title"], tweets)
 
     print("\n" + "="*80)
-    print("🧐 REVIEW HUMAINE")
+    print("🧐 REVIEW HUMAINE - Thread prêt")
     print("="*80)
-    for i, tweet in enumerate(tweets):
-        print(f"\nTweet {i+1}/{len(tweets)} ({len(tweet)} chars):")
+    for i, tweet in enumerate(tweets, 1):
+        print(f"\nTweet {i}/{len(tweets)} ({len(tweet)} chars):")
         print(tweet)
         print("-" * 60)
 
-    approval = input("\nPublier ? (y/n) : ").lower()
+    approval = input("\nPublier ce thread sur X ? (y/n) : ").lower().strip()
     if approval == 'y':
-        if post_thread(tweets):
-            db["posted"].append(video["id"])
-            save_db(db)
-            print("✅ Publié !")
+        # Publication Tweepy à implémenter plus tard
+        print("🔄 Publication simulée (Tweepy non encore activé)")
+        db.setdefault("posted", []).append(video["id"])
+        save_db(db)
+        print("✅ Vidéo marquée comme traitée.")
     else:
-        print("⏭️ Annulé.")
+        print("⏭️ Publication annulée.")
 
 if __name__ == "__main__":
     main()
