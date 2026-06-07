@@ -10,7 +10,6 @@ load_dotenv()
 
 # ===================== CONFIG =====================
 RSS_URL = "https://www.youtube.com/feeds/videos.xml?channel_id=UC4DBLlq1x0AKmip1QJUcbXg"
-DB_FILE = "posted_videos.json"
 ARTIFACTS_DIR = "artifacts"
 
 os.makedirs(ARTIFACTS_DIR, exist_ok=True)
@@ -26,10 +25,18 @@ def load_db():
         try:
             with open(DB_FILE, "r", encoding="utf-8") as f:
                 db = json.load(f)
+            
+            # Normalisation robuste
             if not isinstance(db, dict):
                 db = {}
             if "posted" not in db or not isinstance(db.get("posted"), list):
                 db["posted"] = []
+            
+            return db
+        except (json.JSONDecodeError, IOError, Exception) as e:
+            print(f"⚠️ Fichier {DB_FILE} corrompu ou illisible ({e}). Réinitialisation.")
+            return {"posted": []}
+    
             return db
         except Exception as e:
             print(f"⚠️ Fichier {DB_FILE} corrompu ({e}). Réinitialisation.")
@@ -39,6 +46,7 @@ def load_db():
 
 def save_db(db):
     with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(db, f, indent=2)
         json.dump(db, f, indent=2, ensure_ascii=False)
 
 
@@ -102,8 +110,8 @@ Réponds UNIQUEMENT avec le thread, séparé par ---. Pas d'introduction ni d'ex
         response = model.generate_content(prompt)
         raw = response.text.strip()
         
-        # Parsing des tweets
-        tweets = [t.strip() for t in raw.split('---') if t.strip() and len(t.strip()) > 10]
+        # Parsing robuste
+        tweets = [t.strip() for t in raw_thread.split('---') if t.strip()]
         return tweets
     except Exception as e:
         print(f"❌ Erreur Gemini: {e}")
@@ -120,13 +128,18 @@ def save_artifact(video_id, title, tweets):
     print(f"✅ Artifact sauvegardé : {filename}")
     return filename
 
+def post_thread(tweets):
+    print("🔄 Simulation de publication du thread...")
+    for tweet in tweets:
+        print(f"→ {tweet[:100]}...")
+    return True
 
 def main():
     db = load_db()
     video = get_latest_video()
     
     if not video or video["id"] in db.get("posted", []):
-        print("✅ Aucune nouvelle vidéo à traiter.")
+        print("✅ Aucune nouvelle vidéo.")
         return
 
     print(f"🎥 Nouvelle vidéo détectée : {video['title']}")
@@ -136,30 +149,31 @@ def main():
         print("❌ Impossible d'obtenir le transcript. Passage en mode description seulement (limité).")
         # On continue quand même avec un thread minimal
 
+    print(f"🎥 Nouvelle vidéo détectée : {video['title']}")
     tweets = generate_thread_with_gemini(video["title"], transcript, video["url"])
     if not tweets:
-        print("❌ Échec de la génération du thread.")
+        print("❌ Échec génération thread.")
         return
 
     artifact_file = save_artifact(video["id"], video["title"], tweets)
 
-    print("\n" + "="*90)
-    print("🧐 REVIEW HUMAINE - Thread prêt à publier")
-    print("="*90)
-    for i, tweet in enumerate(tweets, 1):
-        print(f"\nTweet {i}/{len(tweets)} ({len(tweet)} caractères):")
+    # Review humaine
+    print("\n" + "="*80)
+    print("🧐 REVIEW HUMAINE - Thread prêt :")
+    print("="*80)
+    for i, tweet in enumerate(tweets):
+        print(f"\nTweet {i+1}/{len(tweets)} ({len(tweet)} chars):")
         print(tweet)
         print("-" * 70)
 
-    approval = input("\nPublier ce thread sur X ? (y/n) : ").lower().strip()
+    approval = input("\nPublier ce thread ? (y/n) : ").lower()
     if approval == 'y':
-        print("🔄 Publication simulée (Tweepy à activer plus tard)")
-        db.setdefault("posted", []).append(video["id"])
-        save_db(db)
-        print("✅ Vidéo marquée comme traitée.")
+        if post_thread(tweets):
+            db["posted"].append(video["id"])
+            save_db(db)
+            print("✅ Thread publié avec succès !")
     else:
         print("⏭️ Publication annulée.")
-
 
 if __name__ == "__main__":
     main()
