@@ -2,14 +2,13 @@
 """
 Brighter X Autopost - main.py
 Automate la publication de threads X depuis les videos de Brighter with Herbert.
-
 Architecture :
-  1. Detection nouvelle video via RSS
-  2. Extraction du transcript
-  3. Generation du thread via IA (Claude)
-  4. Review humaine (console)
-  5. Publication du thread sur X
-  6. Tracking des videos postees (POSTED_DB / PLANNING_DB)
+ 1. Detection nouvelle video via RSS
+ 2. Extraction du transcript
+ 3. Generation du thread via IA (Gemini)
+ 4. Review humaine (console)
+ 5. Publication du thread sur X
+ 6. Tracking des videos postees (POSTED_DB / PLANNING_DB)
 """
 
 import os
@@ -26,31 +25,25 @@ from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
 load_dotenv()
 
-# IA
-import anthropic
+# IA (Google Gemini)
+import google.generativeai as genai
 
 # X / Twitter
 import tweepy
 
 # Local
 from config import (
-    RSS_FEED_URL, CHANNEL_NAME, CHANNEL_HANDLE,
-    X_USERNAME, X_USER_DISPLAY,
-    AI_MODEL, AI_MAX_TOKENS, AI_TEMPERATURE,
-    PROMPT_MASTER,
-    PLANNING_DB_PATH, PLANNING_DB_DEFAULT,
-    POSTED_DB_PATH, POSTED_DB_DEFAULT,
-    ARTIFACT_DIR, ARTIFACT_FILE_PATTERN,
-    ARTIFACT_APPROVED_TOKEN, ARTIFACT_REJECTED_TOKEN,
-    ARTIFACT_EDIT_REQUESTED_TOKEN,
-    X_TWEET_DELAY_SECONDS, X_MAX_RETRIES,
-    LOG_FILE, LOG_FORMAT, LOG_DATE_FORMAT,
+    RSS_FEED_URL, CHANNEL_NAME, CHANNEL_HANDLE, X_USERNAME, X_USER_DISPLAY,
+    AI_MODEL, AI_MAX_TOKENS, AI_TEMPERATURE, PROMPT_MASTER,
+    PLANNING_DB_PATH, PLANNING_DB_DEFAULT, POSTED_DB_PATH, POSTED_DB_DEFAULT,
+    ARTIFACT_DIR, ARTIFACT_FILE_PATTERN, ARTIFACT_APPROVED_TOKEN,
+    ARTIFACT_REJECTED_TOKEN, ARTIFACT_EDIT_REQUESTED_TOKEN,
+    X_TWEET_DELAY_SECONDS, X_MAX_RETRIES, LOG_FILE, LOG_FORMAT, LOG_DATE_FORMAT,
 )
 
-# ──────────────────────────────────────────────────────────────────
+# ============================================================================
 # LOGGING
-# ──────────────────────────────────────────────────────────────────
-
+# ============================================================================
 logging.basicConfig(
     level=logging.INFO,
     format=LOG_FORMAT,
@@ -62,11 +55,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ──────────────────────────────────────────────────────────────────
+# ============================================================================
 # CLIENTS
-# ──────────────────────────────────────────────────────────────────
-
-AIBot = anthropic.Anthropic()
+# ============================================================================
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    gen_client = genai.GenerativeModel(AI_MODEL)
+    logger.info(f"Gemini client initialise avec le modele {AI_MODEL}.")
+else:
+    logger.error("GEMINI_API_KEY manquante. L'IA ne fonctionnera pas.")
+    gen_client = None
 
 X_API_KEY = os.environ['X_API_KEY']
 X_API_SECRET = os.environ['X_API_SECRET']
@@ -81,18 +80,11 @@ XBot = tweepy.Client(
     wait_on_rate_limit=True,
 )
 
-AI_KEY = os.environ.get('ANTHROPIC_API_KEY')
-AIBot = anthropic.Anthropic(api_key=AI_KEY)
-
-# ──────────────────────────────────────────────────────────────────
+# ============================================================================
 # JSON / DATABASE
-# ──────────────────────────────────────────────────────────────────
-
+# ============================================================================
 def load_json(path: str, default: Any) -> Any:
-    """
-    Charge un fichier JSON. Si le fichier n'existe pas,
-    retourne la valeur par defaut et l'ecrit sur disque.
-    """
+    """ Charge un fichier JSON. Si le fichier n'existe pas, retourne la valeur par defaut et l'ecrit sur disque. """
     if not os.path.exists(path):
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(default, f, indent=2, ensure_ascii=False)
@@ -107,15 +99,11 @@ def save_json(path: str, data: Any) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
     logger.info(f"Fichier {path} sauvegarde.")
 
-# ──────────────────────────────────────────────────────────────────
+# ============================================================================
 # YOUTUBE RSS
-# ──────────────────────────────────────────────────────────────────
-
+# ============================================================================
 def fetch_latest_video() -> Optional[Dict[str, str]]:
-    """
-    Interroge le flux RSS de la chaine et retourne
-    les metadonnees de la dernière video.
-    """
+    """ Interroge le flux RSS de la chaine et retourne les metadonnees de la dernière video. """
     logger.info(f"Recuperation RSS: {RSS_FEED_URL}")
     feed = feedparser.parse(RSS_FEED_URL)
     if not feed.entries:
@@ -129,15 +117,11 @@ def fetch_latest_video() -> Optional[Dict[str, str]]:
         'published': latest.published,
     }
 
-# ──────────────────────────────────────────────────────────────────
+# ============================================================================
 # TRANSCRIPT
-# ──────────────────────────────────────────────────────────────────
-
+# ============================================================================
 def extract_transcript_with_fallback(video_id: str) -> str:
-    """
-    Tente l'extraction du transcript (auto ou manuel) avec un
-    fallback sur un transcript synthetique si l'API echoue.
-    """
+    """ Tente l'extraction du transcript (auto ou manuel) avec un fallback sur un transcript synthetique si l'API echoue. """
     from youtube_transcript_api import YouTubeTranscriptApi
     logger.info(f"Extraction transcript pour {video_id}")
     try:
@@ -148,59 +132,58 @@ def extract_transcript_with_fallback(video_id: str) -> str:
         logger.info("Fallback: transcript synthetique (titre seul).")
         return "(transcript non disponible)"
 
-# ──────────────────────────────────────────────────────────────────
-# IA
-# ──────────────────────────────────────────────────────────────────
+# ============================================================================
+# IA (Gemini)
+# ============================================================================
+def generate_thread_with_ai(title: str, transcript: str, link: str) -> List[str]:
+    """ Appelle Gemini avec le Prompt Master et retourne la liste des tweets (3 a 8). """
+    logger.info("Generation du thread via Gemini...")
+    if not gen_client:
+        logger.error("Client Gemini non initialise. Verifiez GEMINI_API_KEY.")
+        return ["Erreur: Gemini non configure. Verifiez GEMINI_API_KEY."]
 
-def generate_thread_with_ai(
-    title: str, transcript: str, link: str
-) -> List[str]:
-    """
-    Appelle Claude avec le Prompt Master et retourne
-    la liste des tweets (3 a 8).
-    """
-    logger.info("Generation du thread via IA...")
     prompt = PROMPT_MASTER.format(
         username=X_USER_DISPLAY,
         channel_handle=CHANNEL_HANDLE,
         title=title,
-        transcript=transcript[:8000],
+        transcript=transcript[:15000],
     )
-    response = AIBot.messages.create(
-        model=AI_MODEL,
-        max_tokens=AI_MAX_TOKENS,
-        temperature=AI_TEMPERATURE,
-        messages=[{'role': 'user', 'content': prompt}],
-    )
-    raw = response.content[0].text
-    logger.info("Response brute IA recue.")
+    try:
+        response = gen_client.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                max_output_tokens=AI_MAX_TOKENS,
+                temperature=AI_TEMPERATURE,
+            ),
+        )
+        raw = response.text.strip()
+        logger.info("Response brute Gemini recue.")
+    except Exception as e:
+        logger.error(f"Erreur appel Gemini: {e}")
+        return ["Erreur: echec appel AI. Verifiez GEMINI_API_KEY et le modele."]
+
     lines = [line.strip() for line in raw.splitlines() if line.strip()]
     tweets = []
     for line in lines:
         if len(line) <= 260 and len(line) >= 20:
             tweets.append(line)
     if not tweets:
-        logger.error("Aucun tweet genere par l'IA.")
+        logger.error("Aucun tweet genere par Gemini.")
         tweets = ["Thread non genere. Verifiez le transcript ou le prompt."]
     tweets[0] += f"\n\n{link}"
     logger.info(f"{len(tweets)} tweets generes.")
     return tweets
 
-# ──────────────────────────────────────────────────────────────────
+# ============================================================================
 # REVIEW / ARTIFACT
-# ──────────────────────────────────────────────────────────────────
-
+# ============================================================================
 def compute_artifact_path(video_id: str) -> Path:
     """Calcule le chemin du fichier artifact pour un video_id donne."""
     os.makedirs(ARTIFACT_DIR, exist_ok=True)
     return Path(ARTIFACT_DIR) / ARTIFACT_FILE_PATTERN.format(video_id=video_id)
 
 def save_artifact(video_id: str, tweets: List[str]) -> None:
-    """
-    Ecrit le thread complet dans un fichier artifact.
-    Utilise un token en premiere ligne pour la validation.
-    Approve si le token est APPROVED/EDIT_REQUESTED.
-    """
+    """ Ecrit le thread complet dans un fichier artifact. Utilise un token en premiere ligne pour la validation. Approve si le token est APPROVED/EDIT_REQUESTED. """
     path = compute_artifact_path(video_id)
     header = f"# {ARTIFACT_EDIT_REQUESTED_TOKEN}\n"
     body = ""
@@ -210,10 +193,7 @@ def save_artifact(video_id: str, tweets: List[str]) -> None:
     logger.info(f"Artifact sauvegarde: {path}")
 
 def load_artifact(video_id: str) -> tuple[bool, List[str]]:
-    """
-    Lit un artifact existant. Retourne (is_approved, tweets).
-    Si le token n'est pas APPROVED ou EDIT_REQUESTED, le fichier est supprime.
-    """
+    """ Lit un artifact existant. Retourne (is_approved, tweets). Si le token n'est pas APPROVED ou EDIT_REQUESTED, le fichier est supprime. """
     path = compute_artifact_path(video_id)
     if not path.exists():
         return False, []
@@ -238,13 +218,7 @@ def load_artifact(video_id: str) -> tuple[bool, List[str]]:
     return True, tweets
 
 def review_thread(tweets: List[str], video_id: str) -> List[str]:
-    """
-    Affiche chaque tweet avec son nombre de caracteres.
-    Demande a l'utilisateur:
-      y -> publier
-      n -> skip
-      edit -> teleporter dans le fichier artifact
-    """
+    """ Affiche chaque tweet avec son nombre de caracteres. Demande a l'utilisateur: y -> publier n -> skip edit -> teleporter dans le fichier artifact """
     print("\n" + "="*60)
     print(f"THREAD GENERE - {CHANNEL_NAME}")
     print("="*60)
@@ -266,10 +240,9 @@ def review_thread(tweets: List[str], video_id: str) -> List[str]:
         else:
             print("Choix invalide.")
 
-# ──────────────────────────────────────────────────────────────────
+# ============================================================================
 # X POSTING
-# ──────────────────────────────────────────────────────────────────
-
+# ============================================================================
 def clean_tweet(text: str) -> str:
     """Nettoie le texte avant envoi a l'API X."""
     return text.replace('\n', ' ').strip()
@@ -296,29 +269,24 @@ def post_thread(tweets: List[str]) -> None:
             time.sleep(X_TWEET_DELAY_SECONDS)
     logger.info("Thread completes sur X.")
 
-# ──────────────────────────────────────────────────────────────────
+# ============================================================================
 # OUTPUT / ENV
-# ──────────────────────────────────────────────────────────────────
-
+# ============================================================================
 def print_env_diagnosis():
     """Affiche l'etat des variables d'environnement necessaires."""
-    required = ['X_API_KEY', 'X_API_SECRET', 'X_ACCESS_TOKEN', 'X_ACCESS_SECRET', 'ANTHROPIC_API_KEY']
+    required = ['X_API_KEY', 'X_API_SECRET', 'X_ACCESS_TOKEN', 'X_ACCESS_SECRET', 'GEMINI_API_KEY']
     print("\nENV DIAGNOSIS:")
     for k in required:
         if os.environ.get(k):
-            print(f"  {k}: OK")
+            print(f" {k}: OK")
         else:
-            print(f"  {k}: MISSING !")
+            print(f" {k}: MISSING !")
 
-# ──────────────────────────────────────────────────────────────────
+# ============================================================================
 # MAIN LOOP
-# ──────────────────────────────────────────────────────────────────
-
+# ============================================================================
 def check_for_new_video() -> Optional[Dict[str, str]]:
-    """
-    Interroge le RSS et ne retourne la video que si elle
-    est nouvelle (non dans POSTED_DB ni dans PLANNING_DB).
-    """
+    """ Interroge le RSS et ne retourne la video que si elle est nouvelle (non dans POSTED_DB ni dans PLANNING_DB). """
     latest = fetch_latest_video()
     if not latest:
         return None
@@ -337,11 +305,13 @@ def check_for_new_video() -> Optional[Dict[str, str]]:
     return latest
 
 def main():
-    """
-    Point d'entree principal. Executable localement ou via GitHub Actions.
-    """
+    """Point d'entree principal. Executable localement ou via GitHub Actions."""
     logger.info("--- Brighter X Autopost demarre ---")
     print_env_diagnosis()
+
+    if not gen_client:
+        logger.error("Gemini non configure. Arret.")
+        return
 
     # 0. Review artifact precedent (mode asynchrone)
     if os.path.exists(ARTIFACT_DIR):
