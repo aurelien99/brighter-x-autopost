@@ -10,7 +10,6 @@ Architecture :
 5. Publication du thread sur X
 6. Tracking des videos postees (POSTED_DB / PLANNING_DB)
 """
-
 import os
 import sys
 import json
@@ -43,6 +42,7 @@ from config import (
     LOG_FILE, LOG_FORMAT, LOG_DATE_FORMAT,
     ensure_artifacts_dirs,
 )
+
 
 # ============================================================================
 # SETUP: Creer les dossiers artifacts/ et logs/ AVANT le logging
@@ -79,7 +79,6 @@ X_API_KEY = os.environ['X_API_KEY']
 X_API_SECRET = os.environ['X_API_SECRET']
 X_ACCESS_TOKEN = os.environ['X_ACCESS_TOKEN']
 X_ACCESS_SECRET = os.environ['X_ACCESS_SECRET']
-
 XBot = tweepy.Client(
     consumer_key=X_API_KEY,
     consumer_secret=X_API_SECRET,
@@ -124,15 +123,14 @@ def fetch_latest_video() -> Optional[Dict[str, str]]:
         'link': latest.link,
         'published': latest.published,
     }
-
 # ============================================================================
 # TRANSCRIPT
 # ============================================================================
 def extract_transcript_with_fallback(video_id: str) -> str:
-    """Tente l'extraction du transcript (auto ou manuel) avec un fallback sur un transcript synthetique si l'API echoue."""
-    from youtube_transcript_api import YouTubeTranscriptApi
-    logger.info(f"Extraction transcript pour {video_id}")
+    """Tente l'extraction du transcript avec un fallback si l'API echoue."""
     try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        logger.info(f"Extraction transcript pour {video_id}")
         transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['fr', 'en'])
         return ' '.join(entry['text'] for entry in transcript)
     except Exception as e:
@@ -144,12 +142,12 @@ def extract_transcript_with_fallback(video_id: str) -> str:
 # IA (Gemini)
 # ============================================================================
 def generate_thread_with_ai(title: str, transcript: str, link: str, duration: str = "inconnue") -> List[str]:
-    """Appelle Gemini avec le Prompt Master et retourne la liste des tweets (3 a 8)."""
+    """Appelle Gemini avec le Prompt Master et retourne la liste des tweets."""
     logger.info("Generation du thread via Gemini...")
     if not gen_client:
         logger.error("Client Gemini non initialise. Verifiez GEMINI_API_KEY.")
         return ["Erreur: Gemini non configure. Verifiez GEMINI_API_KEY."]
-    
+
     prompt = PROMPT_MASTER.format(
         username=X_USER_DISPLAY,
         channel_handle=CHANNEL_HANDLE,
@@ -158,7 +156,7 @@ def generate_thread_with_ai(title: str, transcript: str, link: str, duration: st
         url=link,
         duration=duration,
     )
-    
+
     try:
         response = gen_client.generate_content(
             prompt,
@@ -171,18 +169,18 @@ def generate_thread_with_ai(title: str, transcript: str, link: str, duration: st
         logger.info("Response brute Gemini recue.")
     except Exception as e:
         logger.error(f"Erreur appel Gemini: {e}")
-        return ["Erreur: echec appel AI. Verifiez GEMINI_API_KEY et le modele."]
-    
+        return ["Erreur: echec appel AI."]
+
     lines = [line.strip() for line in raw.splitlines() if line.strip()]
     tweets = []
     for line in lines:
         if len(line) <= 260 and len(line) >= 20:
             tweets.append(line)
-            
+
     if not tweets:
         logger.error("Aucun tweet genere par Gemini.")
-        tweets = ["Thread non genere. Verifiez le transcript ou le prompt."]
-        
+        tweets = ["Thread non genere."]
+
     tweets[0] += f"\n\n{link}"
     logger.info(f"{len(tweets)} tweets generes.")
     return tweets
@@ -196,7 +194,7 @@ def compute_artifact_path(video_id: str) -> Path:
     return Path(ARTIFACT_DIR) / ARTIFACT_FILE_PATTERN.format(video_id=video_id)
 
 def save_artifact(video_id: str, tweets: List[str]) -> None:
-    """Ecrit le thread complet dans un fichier artifact. Utilise un token en premiere ligne pour la validation. Approve si le token est APPROVED/EDIT_REQUESTED."""
+    """Ecrit le thread complet dans un fichier artifact."""
     path = compute_artifact_path(video_id)
     header = f"# {ARTIFACT_EDIT_REQUESTED_TOKEN}\n"
     body = ""
@@ -205,36 +203,34 @@ def save_artifact(video_id: str, tweets: List[str]) -> None:
     path.write_text(header + body, encoding='utf-8')
     logger.info(f"Artifact sauvegarde: {path}")
 
-def load_artifact(video_id: str) -> tuple[bool, List[str]]:
-    """Lit un artifact existant. Retourne (is_approved, tweets). Si le token n'est pas APPROVED ou EDIT_REQUESTED, le fichier est supprime."""
+def load_artifact(video_id: str) -> tuple:
+    """Lit un artifact existant. Retourne (is_approved, tweets)."""
     path = compute_artifact_path(video_id)
     if not path.exists():
         return False, []
     txt = path.read_text(encoding='utf-8')
     first_line, body = txt.split('\n', 1)
-    approved = ARTIFACT_APPROVED_TOKEN in first_line
-    or_edit = ARTIFACT_EDIT_REQUESTED_TOKEN in first_line
-    
-    if not (approved or or_edit):
+    approved = ARTIFACT_APPROVED_TOKEN in first_line or ARTIFACT_EDIT_REQUESTED_TOKEN in first_line
+    if not approved:
         path.unlink()
         logger.warning(f"Artifact {video_id} non approuve, supprime.")
         return False, []
-    
     tweets = []
     for line in body.splitlines():
         line = line.strip()
-        if not line: continue
+        if not line:
+            continue
         parts = line.split(' | ', 2)
         if len(parts) >= 3:
             tweets.append(parts[2])
-            
     if approved:
         path.unlink()
-        
     return True, tweets
 
 def review_thread(tweets: List[str], video_id: str) -> List[str]:
-    """Affiche chaque tweet avec son nombre de caracteres. Demande a l'utilisateur: y -> publier n -> skip edit -> teleporter dans le fichier artifact."""
+    """Affiche chaque tweet. En CI, auto-publie. En local, demande validation."""
+    is_ci = os.environ.get('CI', '').lower() == 'true'
+
     print("\n" + "="*60)
     print(f"THREAD GENERE - {CHANNEL_NAME}")
     print("="*60)
@@ -242,20 +238,28 @@ def review_thread(tweets: List[str], video_id: str) -> List[str]:
         print(f"\n[{i}/{len(tweets)}] ({len(t)} chars)")
         print(t)
     print("="*60)
-    
-    while True:
-        choice = input("y = publier / n = skip / edit = modifier: ").strip().lower()
-        if choice == 'y':
-            return tweets
-        elif choice == 'n':
-            logger.info("Thread skippe par l'utilisateur.")
-            return []
-        elif choice == 'edit':
-            path = save_artifact(video_id, tweets)
-            print(f"Edit possible dans le fichier artifact. Sauvegardez avec APPROVED.")
-            return tweets
-        else:
-            print("Choix invalide.")
+
+    if is_ci:
+        logger.info("Mode CI detecte: publication automatique du thread.")
+        return tweets
+
+    try:
+        while True:
+            choice = input("y = publier / n = skip / edit = modifier: ").strip().lower()
+            if choice == 'y':
+                return tweets
+            elif choice == 'n':
+                logger.info("Thread skippe par l'utilisateur.")
+                return []
+            elif choice == 'edit':
+                save_artifact(video_id, tweets)
+                print("Edit possible dans le fichier artifact. Sauvegardez avec APPROVED.")
+                return tweets
+            else:
+                print("Choix invalide.")
+    except EOFError:
+        logger.info("EOF detecte: environnement non-interactif. Publication automatique.")
+        return tweets
 
 # ============================================================================
 # X POSTING
@@ -282,7 +286,6 @@ def post_thread(tweets: List[str]) -> None:
                 logger.warning(f"Echec tweet {i}: {e}")
                 if attempt < X_MAX_RETRIES - 1:
                     time.sleep(X_TWEET_DELAY_SECONDS)
-        
         if i < len(tweets):
             time.sleep(X_TWEET_DELAY_SECONDS)
     logger.info("Thread completes sur X.")
@@ -296,23 +299,21 @@ def print_env_diagnosis():
     print("\nENV DIAGNOSIS:")
     for k in required:
         if os.environ.get(k):
-            print(f" {k}: OK")
+            print(f"  {k}: OK")
         else:
-            print(f" {k}: MISSING !")
+            print(f"  {k}: MISSING !")
 
 # ============================================================================
 # MAIN LOOP
 # ============================================================================
 def check_for_new_video() -> Optional[Dict[str, str]]:
-    """Interroge le RSS et ne retourne la video que si elle est nouvelle (non dans POSTED_DB ni dans PLANNING_DB)."""
+    """Interroge le RSS et ne retourne la video que si elle est nouvelle."""
     latest = fetch_latest_video()
     if not latest:
         return None
-    
     posted = load_json(POSTED_DB_PATH, POSTED_DB_DEFAULT)
     planning = load_json(PLANNING_DB_PATH, PLANNING_DB_DEFAULT)
     vid = latest['video_id']
-    
     for p in posted.get('videos', []):
         if p['video_id'] == vid:
             logger.info(f"Video {vid} deja postee.")
@@ -321,7 +322,6 @@ def check_for_new_video() -> Optional[Dict[str, str]]:
         if p['video_id'] == vid:
             logger.info(f"Video {vid} deja en planification.")
             return None
-            
     logger.info(f"Nouvelle video detectee: {latest['title']}")
     return latest
 
@@ -329,11 +329,9 @@ def main():
     """Point d'entree principal. Executable localement ou via GitHub Actions."""
     logger.info("--- Brighter X Autopost demarre ---")
     print_env_diagnosis()
-    
     if not gen_client:
         logger.error("Gemini non configure. Arret.")
         return
-        
     # 0. Review artifact precedent (mode asynchrone)
     if os.path.exists(ARTIFACT_DIR):
         for f in Path(ARTIFACT_DIR).glob("thread_*.txt"):
@@ -347,34 +345,28 @@ def main():
                 save_json(POSTED_DB_PATH, posted)
                 logger.info("Video marquee comme postee.")
                 return
-
     # 1. Detection nouvelle video
     video = check_for_new_video()
     if not video:
         logger.info("Rien de nouveau.")
         return
-
     # 2. Transcript
     title = video['title']
     link = video['link']
     vid = video['video_id']
     transcript = extract_transcript_with_fallback(vid)
-    
     # 3. IA
     tweets = generate_thread_with_ai(title, transcript, link, duration="inconnue")
     if not tweets:
         logger.error("Thread vide, abandon.")
         return
-        
     # 4. Review humaine
     final = review_thread(tweets, vid)
     if not final:
         logger.info("Thread annule par l'utilisateur.")
         return
-        
     # 5. Publication
     post_thread(final)
-    
     # 6. Sauvegarde tracking
     posted = load_json(POSTED_DB_PATH, POSTED_DB_DEFAULT)
     posted['videos'].append({
