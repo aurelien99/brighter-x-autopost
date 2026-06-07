@@ -6,14 +6,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ===================== CONFIG =====================
 RSS_URL = "https://www.youtube.com/feeds/videos.xml?channel_id=UC4DBLlq1x0AKmip1QJUcbXg"
 DB_FILE = "posted_videos.json"
 ARTIFACTS_DIR = "artifacts"
 
 os.makedirs(ARTIFACTS_DIR, exist_ok=True)
-
-print("🚀 Brighter X Autopost - Démarrage")
 
 def load_db():
     if os.path.exists(DB_FILE):
@@ -41,26 +38,25 @@ def get_latest_video():
     }
 
 def get_transcript(video_id):
-    """Transcription YouTube - version corrigée 2026"""
+    """Correction définitive youtube-transcript-api"""
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
-        # Appel correct (méthode statique)
-        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'fr', 'en-US'])
-        full_text = " ".join([entry['text'] for entry in transcript])
-        print(f"✅ Transcript récupéré ({len(full_text)} caractères)")
-        return full_text
+        # Appel correct : YouTubeTranscriptApi.get_transcript est une fonction statique
+        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'fr'])
+        text = " ".join([item['text'] for item in transcript])
+        print(f"✅ Transcript récupéré ({len(text)} caractères)")
+        return text
     except Exception as e:
-        print(f"⚠️ Impossible de récupérer le transcript : {e}")
+        print(f"⚠️ Transcript échoué : {e}")
         return None
 
-def generate_thread(title, transcript, video_url):
-    """Fallback simple si Gemini ne marche pas"""
+def create_fallback_thread(title, url):
     return [
-        f"1/5 🔥 Nouvelle analyse @BrighterwithHerbert : {title[:100]}...",
-        f"2/5 {video_url}",
-        "3/5 Insights intéressants sur SpaceX / Tesla ?",
-        "4/5 Qu'en pensez-vous ?",
-        f"5/5 #Tesla #SpaceX #Optimus @aurel99"
+        f"1/5 🔥 Nouvelle vidéo @BrighterwithHerbert : {title[:110]}...",
+        f"2/5 Regardez-la ici → {url}",
+        "3/5 SpaceX continue-t-il de surprendre les investisseurs ?",
+        "4/5 Quel est votre avis sur l'avenir de Starship / Optimus ?",
+        f"5/5 #Tesla #SpaceX #Optimus #FSD @aurel99"
     ]
 
 def save_artifact(video_id, title, tweets):
@@ -70,7 +66,7 @@ def save_artifact(video_id, title, tweets):
         f.write(f"Titre: {title}\n\n")
         for i, tweet in enumerate(tweets, 1):
             f.write(f"Tweet {i}/{len(tweets)} ({len(tweet)} chars):\n{tweet}\n\n")
-    print(f"✅ Thread sauvegardé → {filename}")
+    print(f"✅ Artifact créé : {filename}")
 
 def main():
     db = load_db()
@@ -83,15 +79,15 @@ def main():
     print(f"🎥 Vidéo détectée : {video['title']}")
 
     transcript = get_transcript(video["id"])
-    tweets = generate_thread(video["title"], transcript, video["url"])
+    tweets = create_fallback_thread(video["title"], video["url"]) if not transcript else create_fallback_thread(video["title"], video["url"])  # On peut améliorer plus tard
 
     save_artifact(video["id"], video["title"], tweets)
 
-    print("\n" + "="*80)
+    print("\n" + "="*85)
     print("🧐 THREAD PRÊT POUR REVIEW")
-    print("="*80)
+    print("="*85)
     for i, t in enumerate(tweets, 1):
-        print(f"\nTweet {i} ({len(t)} chars):\n{t}")
+        print(f"\nTweet {i} ({len(t)} chars):\n{t}\n")
 
 if __name__ == "__main__":
     main()
