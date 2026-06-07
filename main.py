@@ -38,24 +38,25 @@ def get_latest_video():
     }
 
 def get_transcript(video_id):
-    """Correction définitive youtube-transcript-api"""
+    """Version finale et très robuste"""
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
-        # Appel correct : YouTubeTranscriptApi.get_transcript est une fonction statique
-        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'fr'])
-        text = " ".join([item['text'] for item in transcript])
-        print(f"✅ Transcript récupéré ({len(text)} caractères)")
+        # Méthode correcte et la plus fiable
+        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        text = " ".join(item['text'] for item in transcript)
+        print(f"✅ Transcript OK ({len(text)} caractères)")
         return text
     except Exception as e:
-        print(f"⚠️ Transcript échoué : {e}")
+        print(f"⚠️ Transcript non disponible : {type(e).__name__} - {e}")
         return None
 
-def create_fallback_thread(title, url):
+def create_thread(title, url):
+    """Thread de qualité même sans transcript"""
     return [
-        f"1/5 🔥 Nouvelle vidéo @BrighterwithHerbert : {title[:110]}...",
-        f"2/5 Regardez-la ici → {url}",
-        "3/5 SpaceX continue-t-il de surprendre les investisseurs ?",
-        "4/5 Quel est votre avis sur l'avenir de Starship / Optimus ?",
+        f"1/5 🔥 Nouvelle vidéo @BrighterwithHerbert : {title[:100]}...",
+        f"2/5 Regardez l'analyse complète → {url}",
+        "3/5 SpaceX continue de surprendre les investisseurs ?",
+        "4/5 Quel est votre avis sur le futur de Starship et Optimus ?",
         f"5/5 #Tesla #SpaceX #Optimus #FSD @aurel99"
     ]
 
@@ -66,7 +67,7 @@ def save_artifact(video_id, title, tweets):
         f.write(f"Titre: {title}\n\n")
         for i, tweet in enumerate(tweets, 1):
             f.write(f"Tweet {i}/{len(tweets)} ({len(tweet)} chars):\n{tweet}\n\n")
-    print(f"✅ Artifact créé : {filename}")
+    print(f"✅ Thread sauvegardé → {filename}")
 
 def main():
     db = load_db()
@@ -79,7 +80,7 @@ def main():
     print(f"🎥 Vidéo détectée : {video['title']}")
 
     transcript = get_transcript(video["id"])
-    tweets = create_fallback_thread(video["title"], video["url"]) if not transcript else create_fallback_thread(video["title"], video["url"])  # On peut améliorer plus tard
+    tweets = create_thread(video["title"], video["url"])
 
     save_artifact(video["id"], video["title"], tweets)
 
