@@ -3,4 +3,4 @@ youtube-transcript-api
 tweepy
 python-dotenv
 requests
-anthropic
+google-generativeai
