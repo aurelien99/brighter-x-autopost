@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ===================== CONFIG =====================
 RSS_URL = "https://www.youtube.com/feeds/videos.xml?channel_id=UC4DBLlq1x0AKmip1QJUcbXg"
 DB_FILE = "posted_videos.json"
 ARTIFACTS_DIR = "artifacts"
@@ -39,23 +38,18 @@ def get_latest_video():
     }
 
 def get_transcript(video_id):
-    """Essai avec différentes méthodes d'import"""
     try:
-        # Import local pour éviter les conflits
-        import youtube_transcript_api
-        print(f"Version youtube-transcript-api : {youtube_transcript_api.__version__}")
-        
         from youtube_transcript_api import YouTubeTranscriptApi
         transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'fr'])
-        text = " ".join([item['text'] for item in transcript])
-        print(f"✅ Transcript récupéré ({len(text)} caractères)")
+        text = " ".join(item['text'] for item in transcript)
+        print(f"✅ Transcript OK ({len(text)} chars)")
         return text
     except Exception as e:
         print(f"⚠️ Transcript non disponible : {e}")
         return None
 
 def create_thread(title, url):
-    """Thread de bonne qualité même sans transcript"""
+    """Thread de qualité (même sans transcript)"""
     return [
         f"1/5 🔥 Nouvelle vidéo @BrighterwithHerbert : {title[:110]}...",
         f"2/5 Regardez l'analyse complète → {url}",
