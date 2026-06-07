@@ -3,12 +3,12 @@
 Brighter X Autopost - main.py
 Automate la publication de threads X depuis les videos de Brighter with Herbert.
 Architecture :
-    1. Detection nouvelle video via RSS
-    2. Extraction du transcript
-    3. Generation du thread via IA (Gemini)
-    4. Review humaine (console)
-    5. Publication du thread sur X
-    6. Tracking des videos postees (POSTED_DB / PLANNING_DB)
+1. Detection nouvelle video via RSS
+2. Extraction du transcript
+3. Generation du thread via IA (Gemini)
+4. Review humaine (console)
+5. Publication du thread sur X
+6. Tracking des videos postees (POSTED_DB / PLANNING_DB)
 """
 
 import os
@@ -35,10 +35,12 @@ import tweepy
 from config import (
     RSS_FEED_URL, CHANNEL_NAME, CHANNEL_HANDLE, X_USERNAME, X_USER_DISPLAY,
     AI_MODEL, AI_MAX_TOKENS, AI_TEMPERATURE, PROMPT_MASTER,
-    PLANNING_DB_PATH, PLANNING_DB_DEFAULT, POSTED_DB_PATH, POSTED_DB_DEFAULT,
-    ARTIFACT_DIR, ARTIFACT_FILE_PATTERN, ARTIFACT_APPROVED_TOKEN,
-    ARTIFACT_REJECTED_TOKEN, ARTIFACT_EDIT_REQUESTED_TOKEN,
-    X_TWEET_DELAY_SECONDS, X_MAX_RETRIES, LOG_FILE, LOG_FORMAT, LOG_DATE_FORMAT,
+    PLANNING_DB_PATH, PLANNING_DB_DEFAULT,
+    POSTED_DB_PATH, POSTED_DB_DEFAULT,
+    ARTIFACT_DIR, ARTIFACT_FILE_PATTERN,
+    ARTIFACT_APPROVED_TOKEN, ARTIFACT_REJECTED_TOKEN, ARTIFACT_EDIT_REQUESTED_TOKEN,
+    X_TWEET_DELAY_SECONDS, X_MAX_RETRIES,
+    LOG_FILE, LOG_FORMAT, LOG_DATE_FORMAT,
     ensure_artifacts_dirs,
 )
 
@@ -141,7 +143,7 @@ def extract_transcript_with_fallback(video_id: str) -> str:
 # ============================================================================
 # IA (Gemini)
 # ============================================================================
-def generate_thread_with_ai(title: str, transcript: str, link: str) -> List[str]:
+def generate_thread_with_ai(title: str, transcript: str, link: str, duration: str = "inconnue") -> List[str]:
     """Appelle Gemini avec le Prompt Master et retourne la liste des tweets (3 a 8)."""
     logger.info("Generation du thread via Gemini...")
     if not gen_client:
@@ -153,6 +155,8 @@ def generate_thread_with_ai(title: str, transcript: str, link: str) -> List[str]
         channel_handle=CHANNEL_HANDLE,
         title=title,
         transcript=transcript[:15000],
+        url=link,
+        duration=duration,
     )
     
     try:
@@ -168,7 +172,7 @@ def generate_thread_with_ai(title: str, transcript: str, link: str) -> List[str]
     except Exception as e:
         logger.error(f"Erreur appel Gemini: {e}")
         return ["Erreur: echec appel AI. Verifiez GEMINI_API_KEY et le modele."]
-
+    
     lines = [line.strip() for line in raw.splitlines() if line.strip()]
     tweets = []
     for line in lines:
@@ -210,6 +214,7 @@ def load_artifact(video_id: str) -> tuple[bool, List[str]]:
     first_line, body = txt.split('\n', 1)
     approved = ARTIFACT_APPROVED_TOKEN in first_line
     or_edit = ARTIFACT_EDIT_REQUESTED_TOKEN in first_line
+    
     if not (approved or or_edit):
         path.unlink()
         logger.warning(f"Artifact {video_id} non approuve, supprime.")
@@ -222,9 +227,10 @@ def load_artifact(video_id: str) -> tuple[bool, List[str]]:
         parts = line.split(' | ', 2)
         if len(parts) >= 3:
             tweets.append(parts[2])
-    
+            
     if approved:
         path.unlink()
+        
     return True, tweets
 
 def review_thread(tweets: List[str], video_id: str) -> List[str]:
@@ -236,6 +242,7 @@ def review_thread(tweets: List[str], video_id: str) -> List[str]:
         print(f"\n[{i}/{len(tweets)}] ({len(t)} chars)")
         print(t)
     print("="*60)
+    
     while True:
         choice = input("y = publier / n = skip / edit = modifier: ").strip().lower()
         if choice == 'y':
@@ -254,7 +261,7 @@ def review_thread(tweets: List[str], video_id: str) -> List[str]:
 # X POSTING
 # ============================================================================
 def clean_tweet(text: str) -> str:
-    """Nettoie le texte avant envoi a l'API X."""
+    """Cleans up text before sending to X API."""
     return text.replace('\n', ' ').strip()
 
 def post_thread(tweets: List[str]) -> None:
@@ -275,6 +282,7 @@ def post_thread(tweets: List[str]) -> None:
                 logger.warning(f"Echec tweet {i}: {e}")
                 if attempt < X_MAX_RETRIES - 1:
                     time.sleep(X_TWEET_DELAY_SECONDS)
+        
         if i < len(tweets):
             time.sleep(X_TWEET_DELAY_SECONDS)
     logger.info("Thread completes sur X.")
@@ -300,6 +308,7 @@ def check_for_new_video() -> Optional[Dict[str, str]]:
     latest = fetch_latest_video()
     if not latest:
         return None
+    
     posted = load_json(POSTED_DB_PATH, POSTED_DB_DEFAULT)
     planning = load_json(PLANNING_DB_PATH, PLANNING_DB_DEFAULT)
     vid = latest['video_id']
@@ -320,10 +329,11 @@ def main():
     """Point d'entree principal. Executable localement ou via GitHub Actions."""
     logger.info("--- Brighter X Autopost demarre ---")
     print_env_diagnosis()
+    
     if not gen_client:
         logger.error("Gemini non configure. Arret.")
         return
-
+        
     # 0. Review artifact precedent (mode asynchrone)
     if os.path.exists(ARTIFACT_DIR):
         for f in Path(ARTIFACT_DIR).glob("thread_*.txt"):
@@ -349,22 +359,22 @@ def main():
     link = video['link']
     vid = video['video_id']
     transcript = extract_transcript_with_fallback(vid)
-
+    
     # 3. IA
-    tweets = generate_thread_with_ai(title, transcript, link)
+    tweets = generate_thread_with_ai(title, transcript, link, duration="inconnue")
     if not tweets:
         logger.error("Thread vide, abandon.")
         return
-
+        
     # 4. Review humaine
     final = review_thread(tweets, vid)
     if not final:
         logger.info("Thread annule par l'utilisateur.")
         return
-
+        
     # 5. Publication
     post_thread(final)
-
+    
     # 6. Sauvegarde tracking
     posted = load_json(POSTED_DB_PATH, POSTED_DB_DEFAULT)
     posted['videos'].append({
