@@ -40,7 +40,7 @@ def get_latest_video():
 def get_transcript(video_id):
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
-        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'fr'])
+        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'fr', 'en-US'])
         text = " ".join(item['text'] for item in transcript)
         print(f"✅ Transcript OK ({len(text)} chars)")
         return text
@@ -49,7 +49,6 @@ def get_transcript(video_id):
         return None
 
 def create_thread(title, url):
-    """Thread de qualité (même sans transcript)"""
     return [
         f"1/5 🔥 Nouvelle vidéo @BrighterwithHerbert : {title[:110]}...",
         f"2/5 Regardez l'analyse complète → {url}",
