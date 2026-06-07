@@ -8,14 +8,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Config
+# ===================== CONFIG =====================
 RSS_URL = "https://www.youtube.com/feeds/videos.xml?channel_id=UC4DBLlq1x0AKmip1QJUcbXg"
 DB_FILE = "posted_videos.json"
 ARTIFACTS_DIR = "artifacts"
 
 os.makedirs(ARTIFACTS_DIR, exist_ok=True)
 
+# Configuration Gemini
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
+# ===================== FONCTIONS =====================
 
 def load_db():
     """Charge la DB avec gestion robuste des erreurs."""
@@ -23,22 +26,21 @@ def load_db():
         try:
             with open(DB_FILE, "r", encoding="utf-8") as f:
                 db = json.load(f)
-            
             if not isinstance(db, dict):
                 db = {}
             if "posted" not in db or not isinstance(db.get("posted"), list):
                 db["posted"] = []
-            
             return db
         except Exception as e:
             print(f"⚠️ Fichier {DB_FILE} corrompu ({e}). Réinitialisation.")
             return {"posted": []}
-    
     return {"posted": []}
+
 
 def save_db(db):
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(db, f, indent=2, ensure_ascii=False)
+
 
 def get_latest_video():
     feed = feedparser.parse(RSS_URL)
@@ -51,14 +53,29 @@ def get_latest_video():
         "url": entry.link
     }
 
+
 def get_transcript(video_id):
+    """Récupère le transcript avec plusieurs fallbacks."""
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
-        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'fr'])
-        return " ".join([t['text'] for t in transcript])
+        
+        # Méthode 1 : Liste des transcripts disponibles
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript = transcript_list.find_transcript(['en', 'fr'])
+        data = transcript.fetch()
+        return " ".join([entry['text'] for entry in data])
     except Exception as e:
-        print(f"⚠️ Transcript error: {e}")
-        return None
+        print(f"⚠️ Première méthode transcript échouée: {e}")
+        
+        # Méthode 2 : Fallback simple
+        try:
+            from youtube_transcript_api import YouTubeTranscriptApi
+            data = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'fr'])
+            return " ".join([entry['text'] for entry in data])
+        except Exception as e2:
+            print(f"⚠️ Tous les essais de transcript ont échoué: {e2}")
+            return None
+
 
 def generate_thread_with_gemini(title, transcript, video_url):
     prompt = f"""Tu es un expert Tesla, SpaceX, Optimus et AI qui crée du contenu viral sur X pour @aurel99.
@@ -66,40 +83,43 @@ def generate_thread_with_gemini(title, transcript, video_url):
 Crée un thread X complet et prêt à publier.
 
 **RÈGLES STRICTES :**
-- Chaque tweet < 260 caractères
-- Format : 1/N, 2/N, ..., N/N
-- Thread de 3 à 8 tweets
-- Ton engageant, optimiste, insights investing
+- Chaque tweet doit faire moins de 260 caractères
+- Format obligatoire : 1/N, 2/N, ..., N/N
+- Thread entre 3 et 8 tweets
+- Ton engageant, optimiste, avec insights investing
 - Français principal, termes Tesla en anglais
-- Dernier tweet : CTA + hashtags + @aurel99
+- Dernier tweet : CTA + hashtags (#Tesla #TSLA #Optimus #Robotaxi #FSD #SpaceX) + @aurel99
 - Sépare chaque tweet par ---
 
 Titre : {title}
 Lien : {video_url}
-Transcript : {transcript[:18000]}
+Transcript : {transcript[:18000] if transcript else "Pas de transcript disponible"}
 
-Réponds UNIQUEMENT avec le thread, séparé par ---"""
+Réponds UNIQUEMENT avec le thread, séparé par ---. Pas d'introduction ni d'explication."""
 
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
         raw = response.text.strip()
         
-        tweets = [t.strip() for t in raw.split('---') if t.strip() and len(t.strip()) > 5]
+        # Parsing des tweets
+        tweets = [t.strip() for t in raw.split('---') if t.strip() and len(t.strip()) > 10]
         return tweets
     except Exception as e:
         print(f"❌ Erreur Gemini: {e}")
         return None
 
+
 def save_artifact(video_id, title, tweets):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{ARTIFACTS_DIR}/{timestamp}_{video_id[:8]}.txt"
     with open(filename, "w", encoding="utf-8") as f:
-        f.write(f"Titre: {title}\nVideo ID: {video_id}\n\n")
+        f.write(f"Titre: {title}\nVideo ID: {video_id}\nDate: {datetime.now()}\n\n")
         for i, tweet in enumerate(tweets, 1):
             f.write(f"Tweet {i}/{len(tweets)} ({len(tweet)} chars):\n{tweet}\n\n")
     print(f"✅ Artifact sauvegardé : {filename}")
     return filename
+
 
 def main():
     db = load_db()
@@ -113,8 +133,8 @@ def main():
 
     transcript = get_transcript(video["id"])
     if not transcript:
-        print("❌ Impossible d'obtenir le transcript.")
-        return
+        print("❌ Impossible d'obtenir le transcript. Passage en mode description seulement (limité).")
+        # On continue quand même avec un thread minimal
 
     tweets = generate_thread_with_gemini(video["title"], transcript, video["url"])
     if not tweets:
@@ -123,23 +143,23 @@ def main():
 
     artifact_file = save_artifact(video["id"], video["title"], tweets)
 
-    print("\n" + "="*80)
-    print("🧐 REVIEW HUMAINE - Thread prêt")
-    print("="*80)
+    print("\n" + "="*90)
+    print("🧐 REVIEW HUMAINE - Thread prêt à publier")
+    print("="*90)
     for i, tweet in enumerate(tweets, 1):
-        print(f"\nTweet {i}/{len(tweets)} ({len(tweet)} chars):")
+        print(f"\nTweet {i}/{len(tweets)} ({len(tweet)} caractères):")
         print(tweet)
-        print("-" * 60)
+        print("-" * 70)
 
     approval = input("\nPublier ce thread sur X ? (y/n) : ").lower().strip()
     if approval == 'y':
-        # Publication Tweepy à implémenter plus tard
-        print("🔄 Publication simulée (Tweepy non encore activé)")
+        print("🔄 Publication simulée (Tweepy à activer plus tard)")
         db.setdefault("posted", []).append(video["id"])
         save_db(db)
         print("✅ Vidéo marquée comme traitée.")
     else:
         print("⏭️ Publication annulée.")
+
 
 if __name__ == "__main__":
     main()
